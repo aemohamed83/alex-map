@@ -1,0 +1,14 @@
+# Query: icons/
+# ContextLines: 1
+
+6 results - 1 file
+
+Alex_Map.html:
+  74          // --- Branch & POI layers ---
+  75:         loadMarkers("AlMokhtabar.csv", "icons/almokhtabar.png", alMokhtabarMarkers, true);
+  76:         loadMarkers("AlBorg.csv", "icons/alborg.png", alBorgMarkers, true);
+  77:         loadMarkers("Alfa.csv", "icons/alfa.png", alfaMarkers, true);
+  78:         loadMarkers("Hospitals.csv", "http://maps.google.com/mapfiles/ms/icons/purple-dot.png", hospitalMarkers);
+  79:         loadMarkers("Clinics.csv", "http://maps.google.com/mapfiles/ms/icons/orange-dot.png", clinicMarkers);
+  80:         loadMarkers("OtherLabs.csv", "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png", otherLabMarkers);
+  81  
