@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Branch Expansion Map - Alexandria</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCcO7XrR0HcqgQ6OdBIJR2eSc2p5d2-X7A&libraries=visualization"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+      #map { height: 100vh; width: 100vw; }
+      .layer-control {
+        position: absolute; top: 10px; left: 10px; background: white;
+        padding: 10px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        font-family: Arial, sans-serif; max-height: 90vh; overflow-y: auto; font-size: 14px;
+      }
+      .slider-container { margin-top: 10px; }
+      .slider-container label { display: block; margin-bottom: 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- Layer Controls -->
+    <div class="layer-control">
+      <label><input type="checkbox" id="toggleHeatmap" checked> Population Heatmap</label><br>
+      <label><input type="checkbox" id="toggleAlMokhtabar" checked> Al Mokhtabar</label><br>
+      <label><input type="checkbox" id="toggleAlBorg" checked> Al Borg</label><br>
+      <label><input type="checkbox" id="toggleAlfa" checked> Alfa Lab</label><br>
+      <label><input type="checkbox" id="toggleHospitals" checked> Hospitals</label><br>
+      <label><input type="checkbox" id="toggleClinics" checked> Clinics</label><br>
+      <label><input type="checkbox" id="toggleOtherLabs" checked> Other Labs</label><br>
+      <label><input type="checkbox" id="toggleRecommended" checked> ⭐ Recommended Sites</label>
+
+      <div class="slider-container">
+        <label for="radiusSlider">Heatmap Radius: <span id="radiusValue">30</span></label>
+        <input type="range" id="radiusSlider" min="10" max="100" value="30">
+      </div>
+      <div class="slider-container">
+        <label for="opacitySlider">Heatmap Opacity: <span id="opacityValue">1.0</span></label>
+        <input type="range" id="opacitySlider" min="0.1" max="1" step="0.1" value="1">
+      </div>
+    </div>
+
+    <script>
+      let map, heatmap, infoWindow;
+      let alMokhtabarMarkers = [], alBorgMarkers = [], alfaMarkers = [];
+      let hospitalMarkers = [], clinicMarkers = [], otherLabMarkers = [];
+      let recommendedMarkers = [];
+
+      function initMap() {
+        map = new google.maps.Map(document.getElementById("map"), {
+          zoom: 11,
+          center: { lat: 31.2156, lng: 29.9553 }, // Alexandria
+          mapTypeId: "roadmap",
+        });
+        infoWindow = new google.maps.InfoWindow();
+
+        // --- Population heatmap ---
+        Papa.parse("hex_alex_centroidsnew.csv", {
+          download: true, header: true,
+          complete: function(results) {
+            const heatmapData = results.data.map(r => {
+              const lat = parseFloat(r.Latitude), lng = parseFloat(r.Longitude), w = parseFloat(r.VALUE_sum);
+              if (!isNaN(lat) && !isNaN(lng)) return { location: new google.maps.LatLng(lat, lng), weight: w || 1 };
+            }).filter(Boolean);
+            heatmap = new google.maps.visualization.HeatmapLayer({
+              data: heatmapData, map: map, radius: 30, opacity: 1.0,
+              gradient: [
+                "rgba(0, 255, 0, 0)", "rgba(0, 255, 0, 1)", "rgba(255, 255, 0, 1)",
+                "rgba(255, 165, 0, 1)", "rgba(255, 0, 0, 1)"
+              ]
+            });
+          }
+        });
+
+        // --- Branch & POI layers ---
+        loadMarkers("AlMokhtabar.csv", "icons/almokhtabar.png", alMokhtabarMarkers, true);
+        loadMarkers("AlBorg.csv", "icons/alborg.png", alBorgMarkers, true);
+        loadMarkers("Alfa.csv", "icons/alfa.png", alfaMarkers, true);
+        loadMarkers("Hospitals.csv", "http://maps.google.com/mapfiles/ms/icons/purple-dot.png", hospitalMarkers);
+        loadMarkers("Clinics.csv", "http://maps.google.com/mapfiles/ms/icons/orange-dot.png", clinicMarkers);
+        loadMarkers("OtherLabs.csv", "http://maps.google.com/mapfiles/ms/icons/yellow-dot.png", otherLabMarkers);
+
+        // --- Recommended sites layer ---
+        loadRecommended("Recommended_Branches.csv", recommendedMarkers);
+
+        // --- Toggles ---
+        document.getElementById("toggleHeatmap").addEventListener("change", () => {
+          if (heatmap) heatmap.setMap(document.getElementById("toggleHeatmap").checked ? map : null);
+        });
+        setupToggle("toggleAlMokhtabar", alMokhtabarMarkers);
+        setupToggle("toggleAlBorg", alBorgMarkers);
+        setupToggle("toggleAlfa", alfaMarkers);
+        setupToggle("toggleHospitals", hospitalMarkers);
+        setupToggle("toggleClinics", clinicMarkers);
+        setupToggle("toggleOtherLabs", otherLabMarkers);
+        setupToggle("toggleRecommended", recommendedMarkers);
+
+        // --- Sliders ---
+        document.getElementById("radiusSlider").addEventListener("input", function() {
+          const radius = parseInt(this.value);
+          document.getElementById("radiusValue").innerText = radius;
+          if (heatmap) heatmap.set("radius", radius);
+        });
+        document.getElementById("opacitySlider").addEventListener("input", function() {
+          const opacity = parseFloat(this.value);
+          document.getElementById("opacityValue").innerText = opacity.toFixed(1);
+          if (heatmap) heatmap.set("opacity", opacity);
+        });
+      }
+
+      function loadMarkers(csvFile, iconPath, storageArray, isLogo = false) {
+        Papa.parse(csvFile, {
+          download: true, header: true,
+          complete: function(results) {
+            results.data.forEach(row => {
+              const lat = parseFloat(row.Latitude);
+              const lng = parseFloat(row.Longitude);
+              const branchName = row["Branch Name"] || row.Name || "Unnamed Branch";
+              if (isNaN(lat) || isNaN(lng)) return;
+
+              let iconSettings;
+              if (isLogo) {
+                if (iconPath.includes("alfa.png")) {
+                  iconSettings = { url: iconPath, scaledSize: new google.maps.Size(52, 52) }; // Alfa 52px
+                } else {
+                  iconSettings = { url: iconPath, scaledSize: new google.maps.Size(48, 48) }; // Mokhtabar & Borg 48px
+                }
+              } else {
+                iconSettings = iconPath; // Google default dots
+              }
+
+              const marker = new google.maps.Marker({
+                position: { lat, lng }, map, title: branchName, icon: iconSettings
+              });
+
+              marker.addListener("click", () => {
+                infoWindow.setContent(`<b>${branchName}</b>`);
+                infoWindow.open(map, marker);
+              });
+
+              storageArray.push(marker);
+            });
+          }
+        });
+      }
+
+      // --- Recommended sites: Top 3 shiny gold, others normal gold ---
+      function loadRecommended(csvFile, storageArray) {
+        Papa.parse(csvFile, {
+          download: true, header: true,
+          complete: function(results) {
+            results.data.forEach((row, i) => {
+              const lat = parseFloat(row.Latitude);
+              const lng = parseFloat(row.Longitude);
+              const name = row.Name || `Recommended Site #${i+1}`;
+              const score = row.Gap_Score !== undefined ? row.Gap_Score : "";
+              if (isNaN(lat) || isNaN(lng)) return;
+
+              const iconUrl = (i < 3)
+                ? "http://maps.google.com/mapfiles/kml/paddle/ylw-stars.png"   // shiny gold star
+                : "http://maps.google.com/mapfiles/kml/shapes/star_maps.png"; // normal gold star
+
+              const marker = new google.maps.Marker({
+                position: { lat, lng },
+                map,
+                title: name,
+                icon: {
+                  url: iconUrl,
+                  scaledSize: new google.maps.Size(46, 46)
+                },
+                zIndex: 9999
+              });
+
+              marker.addListener("click", () => {
+                const html = score !== "" ? `<b>${name}</b><br>Gap Score: ${score}` : `<b>${name}</b>`;
+                infoWindow.setContent(html);
+                infoWindow.open(map, marker);
+              });
+
+              storageArray.push(marker);
+            });
+          }
+        });
+      }
+
+      function setupToggle(toggleId, markerArray) {
+        document.getElementById(toggleId).addEventListener("change", () => {
+          const visible = document.getElementById(toggleId).checked;
+          markerArray.forEach(m => m.setMap(visible ? map : null));
+        });
+      }
+
+      window.onload = initMap;
+    </script>
+  </body>
+</html>
